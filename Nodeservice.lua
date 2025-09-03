@@ -1,8 +1,11 @@
--- Modular Script --
-
 ------------------------
 -- NODE       SERVICE --
 ------------------------
+type Navigation_Settings= {
+	Points :{},
+	Display:boolean?,
+	JP_Enabled:boolean?
+}
 
 local PFS = game:GetService("PathfindingService")
 local DBS = game:GetService("DataStoreService")
@@ -55,7 +58,14 @@ end
 local OwnerPlaceholder = createOwnerPlaceholder()
 
 local NodeService = {}
-
+NodeService.Nav_Settings = {
+	--[[
+		This defines only the default Navigation Settings.
+	]]
+	Points = {},  -- Needs 2 or more points.
+	Display= false, -- Optional
+	JP_Enabled = false, -- Optional
+}
 NodeService.PathContinuous = {
 	--[[
 		This is storing ALL Path tables that are TYPE: "CONTINUOUS" 
@@ -69,8 +79,22 @@ function NodeService.Print()
 	return print("Success", Get("Success"), "Fail", Get("Fail"))
 end
 
-function NodeService.Compute(PointA :Vector3, PointB :Vector3, DisplayPath :boolean, JumpEnabled :boolean)
+function NodeService.Compute(Configuration:Navigation_Settings)
 	--print("[🆗] NODE SERVICE COMPUTING [", AwaitTimer, "s Await]")
+	if not Configuration then
+		return error("No configuration Provided. Please give one.")
+	end
+	local PointA = Configuration.Points[1]
+	local PointB = Configuration.Points[2]
+	local JumpEnabled = Configuration.JP_Enabled or false
+	local DisplayPath = Configuration.Display or false
+	--print(PointA, PointB)
+	if not PointA or not PointB then
+		warn("⚠️ NO POINTS PROVIDED")
+		return
+	end
+	PointA = PointA.Position
+	PointB = PointB.Position
 	task.wait(AwaitTimer)
 	local path = PFS:CreatePath({
 		AgentRadius = 1,
@@ -112,9 +136,17 @@ function NodeService.Compute(PointA :Vector3, PointB :Vector3, DisplayPath :bool
 								
 				local p0 = nodes[i].Position
 				local p1 = nodes[i + 1].Position
-
+				local act = nodes[i].Action
+				
+				if p1.Y > p0.Y then
+					act = Enum.PathWaypointAction.Jump
+					print("comparing: ", p1.Y, " P0: ", p0.Y)
+				else
+					act = Enum.PathWaypointAction.Walk
+				end
+				task.wait(0.01)
 				-- Add the start point of the segment as a waypoint
-				table.insert(smoothPath, PathWaypoint.new(p0))
+				table.insert(smoothPath, PathWaypoint.new(p0, act))
 
 				-- Interpolate between the two points
 				local steps = 4  -- Number of intermediate points (adjust for smoothness)
@@ -142,22 +174,25 @@ function NodeService.Compute(PointA :Vector3, PointB :Vector3, DisplayPath :bool
 		local smoothPath = interpolatePath(nodes)
 
 		-- Display the smooth path if needed
-		for i, point in ipairs(smoothPath) do
-			if DisplayPath then
-				local attach = Instance.new("Part", ItemFolder)
-				attach.Anchored = true
-				attach.Color = Color3.new(0, 1, 0)
-				attach.Size = Vector3.one
-				attach.Transparency = 0.5
-				attach.Position = point.Position
-				if smoothPath[i+1] then
-					attach.Rotation = (point.Position - smoothPath[i+1].Position ).Unit
+		local function Render()
+			for i, point in ipairs(smoothPath) do
+				if DisplayPath then
+					local attach = Instance.new("Part", ItemFolder)
+					attach.Anchored = true
+					attach.Color = point.Action == Enum.PathWaypointAction.Jump and Color3.new(0, 1, 1) or Color3.new(0, 1, 0)
+					attach.Size = Vector3.one
+					attach.Transparency = 0.5
+					attach.Position = point.Position
+					if smoothPath[i+1] then
+						attach.Rotation = (point.Position - smoothPath[i+1].Position ).Unit
+					end
+					attach.CanCollide = false
+					attach.Material = Enum.Material.Neon
+					table.insert(Appending.Childs, attach)
 				end
-				attach.CanCollide = false
-				attach.Material = Enum.Material.Neon
-				table.insert(Appending.Childs, attach)
 			end
 		end
+		Render()
 		
 		Log("Success", "Node Service", Get("Success") + 1 )
 		table.insert(Paths, Appending)
@@ -170,13 +205,27 @@ function NodeService.Compute(PointA :Vector3, PointB :Vector3, DisplayPath :bool
 end
 
 
-function NodeService:MultiCompute(Blocks : {BasePart}, Show :boolean, JumpEnabled :boolean)
+function NodeService:MultiCompute(Nav_Settings:Navigation_Settings)
+	if not Nav_Settings then
+		return error("No Settings provided. Please provide one.")
+	end
+	local Blocks = Nav_Settings.Points
+	local Show = Nav_Settings.Display or false
+	local JumpEnabled = Nav_Settings.JP_Enabled or false
+	if not Blocks then
+		return error("No blocks provided.")
+	end
 	local points = {} :: {PathWaypoint}
 	for i, block in Blocks do
 		if Blocks[i+1] then
-			local A = block.Position
-			local B = Blocks[i+1].Position
-			local nodes = NodeService.Compute(A, B, Show, JumpEnabled)
+			local A = block
+			local B = Blocks[i+1]
+			local newSetting = Nav_Settings
+			newSetting.Points = {
+				A,
+				B,
+			}
+			local nodes = NodeService.Compute(newSetting)
 
 			if nodes then
 				for _, node in nodes do
@@ -191,6 +240,9 @@ function NodeService:MultiCompute(Blocks : {BasePart}, Show :boolean, JumpEnable
 	return points
 end
 
+--[[
+	DEPRECATED UNTIL NEXT VERSION
+]]
 function NodeService.Continuous(Block1 :BasePart, Block2 :BasePart, Time :number)
 	local LatestPath = {}
 	local ID = #PathContinuous + 1
@@ -246,7 +298,9 @@ function NodeService.Continuous(Block1 :BasePart, Block2 :BasePart, Time :number
 	
 	return ID
 end
-
+--[[
+	DEPRECATED UNTIL NEXT VERSION
+]]
 function NodeService.MultiContinuous(BlockList: {} , Time :number, WarningEnabled : boolean, display:boolean)
 	local LatestPath = {}
 	local ID = #PathContinuous + 1
